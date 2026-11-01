@@ -1,3 +1,20 @@
+# Mango, now with global tearing.
+### This is a personal fork of mangowm with the express purpose of enabling global tearing, meaning EVERYTHING will tear in regular desktop usage, including the cursor.
+
+> [!NOTE]
+> This has been entirely vibecoded and its only purpose is to measure latency, specifically for i915. Use at your own discretion.
+
+Otherwise, follow the usual manual build instructions, then set the configuration options:
+```conf
+env=WLR_DRM_NO_ATOMIC,1
+force_tearing=1
+```
+### Special thanks to the [urayde/niri](https://github.com/urayde/niri) fork for being the main inspiration for this.
+
+##
+
+<br>
+
 <div align="center">
   <img src="assets/mango.svg" alt="Mango Logo" width="120"/>
 
