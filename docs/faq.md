@@ -65,6 +65,14 @@ Then force it for your specific game:
 window_rule=force_tearing:1,title:Counter-Strike 2
 ```
 
+To force tearing for the entire desktop (all windows, layers and
+compositor-rendered content) instead of one window, use the global debug
+override:
+
+```ini
+force_tearing=1
+```
+
 > **Warning:** Some graphics cards require setting `env=WLR_DRM_NO_ATOMIC,1` in config before mango starts for tearing to work. 
 > See [Monitors — Tearing](/docs/configuration/monitors#tearing-game-mode) for details.
 

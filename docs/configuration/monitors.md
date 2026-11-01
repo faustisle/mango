@@ -120,6 +120,7 @@ Tearing allows games to bypass the compositor's VSync for lower latency.
 | Setting | Default | Description |
 | :--- | :--- | :--- |
 | `allow_tearing` | `0` | Global tearing control: `0` (Disable), `1` (Enable), `2` (Fullscreen only). |
+| `force_tearing` | `0` | Debug override: `1` forces asynchronous presentation for every frame of every output, ignoring `allow_tearing`, window rules, client hints and fullscreen state. |
 
 ## HDR
 > HDR is only supported in wl-only branch, since it requires the `vulkan` renderer but scenefx is not supported yet.
@@ -216,6 +217,34 @@ window_rule=force_tearing:1,title:vkcube
 | **ENABLED** (1) | Not Allowed | Allowed | Only fullscreen allowed |
 | **DISABLED** (2) | Not Allowed | Not Allowed | Not Allowed |
 
+### Force tearing globally (debug)
+
+`force_tearing=1` is an experimental global override, equivalent to niri's
+`debug.force-tearing`. It does not make a per-window decision: every output
+frame — windows, layer surfaces, borders, bars and other compositor-rendered
+content — is submitted with an asynchronous page flip, so the whole desktop can
+tear and input latency drops.
+
+```ini
+force_tearing=1
+```
+
+It takes precedence over `allow_tearing`, `force_tearing` window rules, client
+tearing hints and fullscreen state, and applies to every output.
+
+Mango still tests every frame with `wlr_output_test_state()` and transparently
+falls back to a vsync-synced commit if the DRM driver rejects the asynchronous
+page flip. The hardware cursor plane is managed by wlroots and may still update
+on vblank depending on the driver, so cursor tearing is not guaranteed on every
+GPU.
+
+Some drivers only accept asynchronous flips for a subset of their scanout
+modifiers (for example i915 refuses render-compressed CCS tilings). When tearing
+is requested, mango allocates its presentation buffers with an async-capable
+modifier instead of the default one, so the flip is not silently rejected. If
+the output exposes no such modifier, tearing falls back to synchronized
+presentation and a message is logged.
+
 ### Graphics Card Compatibility
 
 > **Warning:** Some graphics cards require setting the `WLR_DRM_NO_ATOMIC` environment variable before mango starts to successfully enable tearing.
@@ -224,6 +253,11 @@ Add this to config and relogin mango:
 ```
 env=WLR_DRM_NO_ATOMIC,1
 ```
+
+On Intel this is mandatory: wlroots adds the cursor plane to every atomic
+commit, and the i915 driver only allows asynchronous flips when the commit
+contains async-capable planes alone. The legacy interface flips the primary
+plane through `drmModePageFlip()` and is the only path where tearing works.
 
 ---
 
