@@ -22,16 +22,20 @@
 #include "mango/manage/layer.h"
 #include "mango/manage/misc.h"
 #include "mango/manage/xwayland_primary.h"
+#include <drm/drm_fourcc.h>
 #include <fcntl.h>
 #include <scenefx/render/fx_renderer/fx_renderer.h>
 #include <scenefx/types/wlr_scene.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
 #include <wlr/backend/session.h>
 #include <wlr/backend/wayland.h>
 #include <wlr/render/allocator.h>
+#include <wlr/render/swapchain.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_drm_lease_v1.h>
@@ -42,6 +46,7 @@
 #include <wlr/types/wlr_session_lock_v1.h>
 #include <wlr/types/wlr_single_pixel_buffer_v1.h>
 #include <wlr/types/wlr_switch.h>
+#include <xf86drm.h>
 
 bool is_special_active(const Monitor *m) {
 	return m && !m->isoverview && (m->tagset[m->seltags] & TAG0_MASK);
@@ -360,6 +365,144 @@ bool blur_layer_on_wallpaper(uint32_t layer) {
 	}
 }
 
+static bool is_async_capable_modifier(uint64_t modifier) {
+	switch (modifier) {
+	case I915_FORMAT_MOD_Y_TILED:
+	case I915_FORMAT_MOD_X_TILED:
+	case I915_FORMAT_MOD_Yf_TILED:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool swapchain_is_async_capable(const struct wlr_swapchain *swapchain) {
+	if (swapchain == NULL || swapchain->format.len == 0)
+		return false;
+
+	for (size_t i = 0; i < swapchain->format.len; i++) {
+		if (!is_async_capable_modifier(swapchain->format.modifiers[i]))
+			return false;
+	}
+
+	return true;
+}
+
+/*
+ * The kernel only accepts asynchronous page flips for a subset of the scanout
+ * formats a plane reports: on i915, render compressed (CCS) tilings are
+ * rejected (display WA #0731), yet they are exactly what GBM picks when it is
+ * handed the full IN_FORMATS modifier list. Restrict the swapchain to the
+ * tiled modifiers that are usable for async flips, so GBM picks one of those
+ * instead. Returns NULL when the output exposes no such modifier.
+ */
+static struct wlr_swapchain *
+create_async_swapchain(struct wlr_output *output,
+					   struct wlr_output_state *state) {
+	struct wlr_swapchain *base = output->swapchain;
+	if (base == NULL || base->format.len == 0)
+		return NULL;
+
+	uint64_t *modifiers = calloc(base->format.len, sizeof(*modifiers));
+	if (modifiers == NULL)
+		return NULL;
+
+	size_t len = 0;
+	for (size_t i = 0; i < base->format.len; i++) {
+		if (!is_async_capable_modifier(base->format.modifiers[i]))
+			continue;
+
+		bool duplicate = false;
+		for (size_t j = 0; j < len; j++) {
+			if (modifiers[j] == base->format.modifiers[i]) {
+				duplicate = true;
+				break;
+			}
+		}
+		if (!duplicate)
+			modifiers[len++] = base->format.modifiers[i];
+	}
+	if (len == 0) {
+		free(modifiers);
+		return NULL;
+	}
+
+	struct wlr_drm_format format = {
+		.format = base->format.format,
+		.len = len,
+		.capacity = len,
+		.modifiers = modifiers,
+	};
+	struct wlr_swapchain *swapchain =
+		wlr_swapchain_create(base->allocator, base->width, base->height,
+							 &format);
+	free(modifiers);
+	if (swapchain == NULL)
+		return NULL;
+
+	/*
+	 * Make sure a buffer can be allocated and that the backend accepts it as
+	 * a scanout buffer before switching frames over to this swapchain.
+	 */
+	struct wlr_buffer *buffer = wlr_swapchain_acquire(swapchain);
+	if (buffer == NULL) {
+		wlr_swapchain_destroy(swapchain);
+		return NULL;
+	}
+
+	struct wlr_dmabuf_attributes attribs;
+	if (wlr_buffer_get_dmabuf(buffer, &attribs)) {
+		char *modifier_name = drmGetFormatModifierName(attribs.modifier);
+		wlr_log(WLR_DEBUG,
+				"Using modifier %s (0x%016" PRIX64 ") for tearing on output '%s'",
+				modifier_name ? modifier_name : "<unknown>", attribs.modifier,
+				output->name);
+		free(modifier_name);
+	}
+
+	struct wlr_output_state test = *state;
+	test.committed |= WLR_OUTPUT_STATE_BUFFER;
+	test.buffer = buffer;
+	bool ok = wlr_output_test_state(output, &test);
+	wlr_buffer_unlock(buffer);
+	if (!ok) {
+		wlr_swapchain_destroy(swapchain);
+		return NULL;
+	}
+
+	return swapchain;
+}
+
+/*
+ * Replace the output's primary swapchain with one whose buffers can be flipped
+ * asynchronously. This must happen while a full modeset is being committed:
+ * the legacy KMS API cannot change the scanout buffer layout with a plain page
+ * flip, so switching at any other time makes the next flip fail.
+ */
+static void install_async_swapchain(struct wlr_output *output,
+									struct wlr_output_state *state) {
+	if (!config.force_tearing && !config.allow_tearing)
+		return;
+
+	if (!wlr_output_configure_primary_swapchain(output, state,
+											   &output->swapchain))
+		return;
+	if (swapchain_is_async_capable(output->swapchain))
+		return;
+
+	struct wlr_swapchain *swapchain = create_async_swapchain(output, state);
+	if (swapchain == NULL) {
+		wlr_log(WLR_ERROR,
+				"Output '%s' has no async-capable scanout modifier, tearing "
+				"falls back to synchronized page flips",
+				output->name);
+		return;
+	}
+
+	wlr_swapchain_destroy(output->swapchain);
+	output->swapchain = swapchain;
+}
+
 bool mango_scene_output_commit(struct wlr_scene_output *scene_output,
 							   struct wlr_output_state *state) {
 	struct wlr_output *wlr_output = scene_output->output;
@@ -389,6 +532,15 @@ bool mango_scene_output_commit(struct wlr_scene_output *scene_output,
 	struct wlr_scene_output_state_options opts = {0};
 	if (m->icc_transform && !has_img_desc)
 		opts.color_transform = m->icc_transform;
+
+	/*
+	 * A modeset commit is the only safe point to change the scanout buffer
+	 * layout on the legacy KMS API, so keep an async-capable swapchain
+	 * installed whenever tearing may be requested.
+	 */
+	if (state->allow_reconfiguration)
+		install_async_swapchain(wlr_output, state);
+
 	if (!wlr_scene_output_build_state(scene_output, state, &opts))
 		return false;
 
@@ -783,6 +935,8 @@ void handle_new_output(struct wl_listener *listener, void *data) {
 	};
 	if (m->icc_transform && !has_img_desc)
 		opts.color_transform = m->icc_transform;
+
+	install_async_swapchain(wlr_output, &state);
 
 	wlr_scene_output_build_state(m->scene_output, &state, &opts);
 
