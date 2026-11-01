@@ -237,6 +237,8 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
 		config->tag_carousel = atoi(value);
 	} else if (strcmp(key, "allow_tearing") == 0) {
 		config->allow_tearing = atoi(value);
+	} else if (strcmp(key, "force_tearing") == 0) {
+		config->force_tearing = atoi(value);
 	} else if (strcmp(key, "hdr_depth") == 0) {
 		config->hdr_depth = atoi(value);
 	} else if (strcmp(key, "allow_shortcuts_inhibit") == 0) {
@@ -2459,6 +2461,7 @@ void set_value_default() {
 	config.syncobj_enable = 1;
 	config.tag_carousel = 0;
 	config.allow_tearing = TEARING_DISABLED;
+	config.force_tearing = 0;
 	config.hdr_depth = MANGO_RENDER_BIT_DEPTH_10;
 	config.allow_shortcuts_inhibit = SHORTCUTS_INHIBIT_ENABLE;
 	config.disable_middle_paste = 0;
@@ -2801,6 +2804,7 @@ void override_config(void) {
 	config.drag_tile_to_tile = CLAMP_INT(config.drag_tile_to_tile, 0, 1);
 	config.drag_tile_small = CLAMP_INT(config.drag_tile_small, 0, 1);
 	config.allow_tearing = CLAMP_INT(config.allow_tearing, 0, 2);
+	config.force_tearing = CLAMP_INT(config.force_tearing, 0, 1);
 	config.hdr_depth = CLAMP_INT(config.hdr_depth, 0, 2);
 	config.allow_shortcuts_inhibit =
 		CLAMP_INT(config.allow_shortcuts_inhibit, 0, 1);

@@ -564,6 +564,7 @@ typedef struct {
 	int32_t syncobj_enable;
 	int32_t tag_carousel;
 	int32_t allow_tearing;
+	int32_t force_tearing;
 	int32_t allow_shortcuts_inhibit;
 	int32_t disable_middle_paste;
 	int32_t allow_lock_transparent;

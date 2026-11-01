@@ -51,6 +51,17 @@ void handle_tearing_new_object(struct wl_listener *listener, void *data) {
 	wl_signal_add(&new_tearing_control->events.destroy, &controller->destroy);
 }
 bool check_tearing_frame_allow(Monitor *m) {
+	/*
+	 * Global debug override: force every frame of every output to use an
+	 * asynchronous page flip, regardless of the focused client, fullscreen
+	 * state, window rules or client tearing hints. This is the equivalent of
+	 * niri's debug.force-tearing: the whole composited desktop (windows,
+	 * layers, decorations, ...) is presented asynchronously.
+	 */
+	if (config.force_tearing) {
+		return true;
+	}
+
 	/* never allow tearing when disabled */
 	if (!config.allow_tearing) {
 		return false;
