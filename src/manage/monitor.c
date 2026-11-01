@@ -503,6 +503,28 @@ static void install_async_swapchain(struct wlr_output *output,
 	output->swapchain = swapchain;
 }
 
+/*
+ * The hardware cursor plane is updated on vblank and can never be part of an
+ * asynchronous primary plane flip, so the cursor would stay synchronized while
+ * the rest of the desktop tears. Render it into the primary framebuffer
+ * instead: the cursor is then presented by the same async flip as the frame it
+ * belongs to.
+ *
+ * This costs an extra composite whenever the cursor moves (and disables direct
+ * scan-out while it is visible), so it is restricted to the force_tearing debug
+ * mode. When the cursor is hidden, as it usually is during gameplay, the scene
+ * renders exactly as before.
+ */
+void monitor_update_software_cursor(Monitor *m) {
+	bool wanted = config.force_tearing;
+
+	if (!m || !m->wlr_output || m->software_cursor_locked == wanted)
+		return;
+
+	wlr_output_lock_software_cursors(m->wlr_output, wanted);
+	m->software_cursor_locked = wanted;
+}
+
 bool mango_scene_output_commit(struct wlr_scene_output *scene_output,
 							   struct wlr_output_state *state) {
 	struct wlr_output *wlr_output = scene_output->output;
@@ -937,6 +959,7 @@ void handle_new_output(struct wl_listener *listener, void *data) {
 		opts.color_transform = m->icc_transform;
 
 	install_async_swapchain(wlr_output, &state);
+	monitor_update_software_cursor(m);
 
 	wlr_scene_output_build_state(m->scene_output, &state, &opts);
 

@@ -234,9 +234,16 @@ tearing hints and fullscreen state, and applies to every output.
 
 Mango still tests every frame with `wlr_output_test_state()` and transparently
 falls back to a vsync-synced commit if the DRM driver rejects the asynchronous
-page flip. The hardware cursor plane is managed by wlroots and may still update
-on vblank depending on the driver, so cursor tearing is not guaranteed on every
-GPU.
+page flip.
+
+The mouse cursor is composited into the primary framebuffer while
+`force_tearing` is enabled. The hardware cursor plane is updated on vblank and
+cannot take part in an asynchronous flip, so compositing it is what makes the
+pointer tear together with the rest of the frame. The trade-off is that mango
+re-renders the scene whenever the cursor moves and cannot use direct scan-out
+while the cursor is visible; when the cursor is hidden, as it usually is during
+gameplay, rendering cost is unchanged. Per-window tearing (`allow_tearing` and
+`force_tearing` window rules) keeps using the hardware cursor.
 
 Some drivers only accept asynchronous flips for a subset of their scanout
 modifiers (for example i915 refuses render-compressed CCS tilings). When tearing

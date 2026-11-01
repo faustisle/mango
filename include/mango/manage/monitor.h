@@ -85,6 +85,7 @@ struct Monitor {
 	bool vrr_global_enable;
 	bool is_vrr_enabling;
 	bool vrr_enable_failed;
+	bool software_cursor_locked; /* forced into the primary framebuffer */
 	bool hdr_enable;
 	bool prefer_disable;
 	bool is_hdr_enabling;
@@ -162,6 +163,7 @@ void handle_renderer_lost(struct wl_listener *listener, void *data);
 void setgaps(int32_t oh, int32_t ov, int32_t ih, int32_t iv);
 bool mango_scene_output_commit(struct wlr_scene_output *scene_output,
 							   struct wlr_output_state *state);
+void monitor_update_software_cursor(Monitor *m);
 struct wlr_output_mode *get_nearest_output_mode(struct wlr_output *output,
 												int32_t width, int32_t height,
 												float refresh);

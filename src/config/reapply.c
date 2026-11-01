@@ -176,6 +176,7 @@ void reset_option(void) {
 	 * space on all outputs. */
 	Monitor *m = NULL;
 	wl_list_for_each(m, &server.monitors, link) {
+		monitor_update_software_cursor(m);
 		if (m->wlr_output->enabled) {
 			title_message_bar_apply_config(m);
 			title_message_bar_update(m);
